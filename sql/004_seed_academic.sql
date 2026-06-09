@@ -1,0 +1,2 @@
+-- Academic data (courses, sections, syllabus) is created via the admin console
+-- and faculty onboarding — no demo seed content.

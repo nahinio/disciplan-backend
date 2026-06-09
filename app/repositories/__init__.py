@@ -1,0 +1,33 @@
+from app.repositories import (
+    academic_repo,
+    admin_repo,
+    assessment_repo,
+    auth_repo,
+    blog_repo,
+    chat_repo,
+    dashboard_repo,
+    file_repo,
+    forum_repo,
+    gamification_repo,
+    notification_repo,
+    practice_repo,
+    section_repo,
+    team_repo,
+)
+
+__all__ = [
+    "academic_repo",
+    "admin_repo",
+    "assessment_repo",
+    "auth_repo",
+    "blog_repo",
+    "chat_repo",
+    "dashboard_repo",
+    "file_repo",
+    "forum_repo",
+    "gamification_repo",
+    "notification_repo",
+    "practice_repo",
+    "section_repo",
+    "team_repo",
+]
