@@ -14,11 +14,21 @@ Repository: [github.com/nahinio/disciplan-backend](https://github.com/nahinio/di
 2. Connect **nahinio/disciplan-backend**
 3. Settings:
    - **Runtime:** Python 3
-   - **Build command:** `pip install -r requirements.txt`
+   - **Python version:** `3.12.8` (required — do **not** use 3.14; builds fail on Rust/maturin)
+   - **Build command:** `pip install --upgrade pip && pip install -r requirements.txt`
    - **Start command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
    - **Health check path:** `/health`
 
 Or use **Blueprint** and upload `render.yaml` from this repo.
+
+### Python version (important)
+
+If the build log shows `python3.14` or errors about `maturin` / `cargo` / read-only file system:
+
+1. Render Dashboard → your service → **Environment**
+2. Add: `PYTHON_VERSION` = `3.12.8`
+3. Or rely on `runtime.txt` in the repo (already set to `python-3.12.8`)
+4. **Clear build cache** → **Manual Deploy** → Deploy latest commit
 
 ## 3. Environment variables
 
