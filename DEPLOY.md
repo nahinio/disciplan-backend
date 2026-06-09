@@ -38,7 +38,7 @@ Copy from `.env.example`. Required on Render:
 |----------|--------|
 | `APP_ENV` | `production` |
 | `DEBUG` | `false` |
-| `CORS_ORIGINS` | Your Vercel URL, e.g. `https://disciplan.vercel.app` |
+| `CORS_ORIGINS` | Vercel URL **without trailing slash**, e.g. `https://disciplan-frontend.vercel.app` |
 | `DB_HOST` | Aiven host |
 | `DB_PORT` | Aiven port |
 | `DB_USER` | Aiven user |
