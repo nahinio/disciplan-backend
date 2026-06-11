@@ -71,19 +71,6 @@ async def get_request(conn: pymysql.Connection, request_id: int) -> dict[str, An
     )
 
 
-async def get_pending_by_user(conn: pymysql.Connection, user_id: int) -> dict[str, Any] | None:
-    return await fetch_one(
-        conn,
-        """
-        SELECT id, status FROM faculty_verification_requests
-        WHERE user_id = %s AND status = 'pending'
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        (user_id,),
-    )
-
-
 async def approve_request(
     conn: pymysql.Connection, *, request_id: int, reviewer_id: int
 ) -> dict[str, Any] | None:

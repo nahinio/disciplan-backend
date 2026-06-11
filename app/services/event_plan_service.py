@@ -31,6 +31,99 @@ def _days_remaining(today: date, deadline: date) -> int:
     return max(1, (deadline - today).days + 1)
 
 
+async def get_daily_task_counts(conn, user_id: int, start_date: date, end_date: date) -> dict[date, int]:
+    rows = await fetch_all(
+        conn,
+        """
+        SELECT COALESCE(scheduled_for_date, DATE(due_at)) AS task_date, COUNT(*) AS cnt
+        FROM user_tasks
+        WHERE user_id = %s
+          AND is_completed = 0
+          AND is_skipped = 0
+          AND (
+            scheduled_for_date BETWEEN %s AND %s
+            OR (scheduled_for_date IS NULL AND DATE(due_at) BETWEEN %s AND %s)
+          )
+        GROUP BY task_date
+        """,
+        (user_id, start_date, end_date, start_date, end_date),
+    )
+    res = {}
+    for r in rows:
+        d = r.get("task_date")
+        if d:
+            if isinstance(d, datetime):
+                d = d.date()
+            res[d] = int(r["cnt"])
+    return res
+
+
+async def _schedule_divided_tasks(
+    conn,
+    *,
+    user_id: int,
+    plan_id: int,
+    plan: dict,
+    title: str,
+    deadline_at: datetime,
+    priority_id: int,
+    energy_level_id: int | None,
+    planner_task_type_id: int | None,
+    course_id: int | None,
+    section_id: int | None,
+    estimated_effort_min: int | None,
+) -> None:
+    import math
+    today = date.today()
+    deadline_date = deadline_at.date()
+    days_rem = (deadline_date - today).days + 1
+
+    if days_rem <= 0:
+        N = 1
+        selected_dates = [today]
+    elif days_rem <= 5:
+        N = days_rem
+        selected_dates = [today + timedelta(days=i) for i in range(days_rem)]
+    else:
+        N = 5
+        all_candidates = [today + timedelta(days=i) for i in range(days_rem)]
+        counts = await get_daily_task_counts(conn, user_id, today, deadline_date)
+        sorted_candidates = sorted(all_candidates, key=lambda d: (counts.get(d, 0), d))
+        selected_dates = sorted_candidates[:5]
+        selected_dates.sort()
+
+    subtask_effort = None
+    if estimated_effort_min is not None:
+        subtask_effort = int(math.ceil(estimated_effort_min / N))
+
+    for i, d in enumerate(selected_dates):
+        part_title = f"{title} Part {i + 1}"
+        due_at = datetime.combine(d, deadline_at.time())
+        await _insert_task(
+            conn,
+            user_id=user_id,
+            plan=plan,
+            title=part_title,
+            due_at=due_at,
+            scheduled_for_date=d,
+            source="event_slice",
+            weight_profile="planner",
+            priority_id=priority_id,
+            energy_level_id=energy_level_id,
+            planner_task_type_id=planner_task_type_id,
+            course_id=course_id,
+            section_id=section_id,
+            estimated_effort_min=subtask_effort,
+            event_plan_id=plan_id,
+            slice_date=d,
+            base_target=100.0 / N,
+            carryover=0.0,
+            effective_target=100.0 / N,
+            completion_percent=0,
+            completed_portion=0.0,
+        )
+
+
 def _recurrence_dates(day_of_week: int, start: date, weeks: int = 8) -> list[date]:
     """day_of_week: 0=Sunday per JS convention."""
     py_target = (day_of_week + 6) % 7  # Sun=0 -> 6, Mon=1 -> 0
@@ -264,7 +357,7 @@ async def fetch_all_active_divide_plans(
         SELECT pep.*, pep.priority_id, pep.energy_level_id, pep.planner_task_type_id
         FROM planner_event_plans pep
         WHERE pep.owner_user_id = %s AND pep.is_active = 1 AND pep.is_completed = 0
-          AND pep.scheduling_mode IN ('deadline_divide', 'grading_linked')
+          AND pep.scheduling_mode IN ('grading_linked')
           AND pep.deadline_at IS NOT NULL
           AND DATE(pep.deadline_at) >= %s
         """,
@@ -328,8 +421,27 @@ async def _ensure_recurring_today(conn, user_id: int, target_date: date) -> None
     for plan in plans:
         if await event_plan_repo.slice_exists(conn, plan["id"], user_id, target_date):
             continue
-        st: time = plan["starts_time"]
-        occ_start = datetime.combine(target_date, st)
+        st = plan["starts_time"]
+        if isinstance(st, timedelta):
+            total_seconds = int(st.total_seconds())
+            hours = (total_seconds // 3600) % 24
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            st_time = time(hours, minutes, seconds)
+        elif isinstance(st, str):
+            if ":" in st:
+                parts = st.split(":")
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                seconds = int(parts[2]) if len(parts) > 2 else 0
+                st_time = time(hours, minutes, seconds)
+            else:
+                st_time = time.fromisoformat(st)
+        elif isinstance(st, time):
+            st_time = st
+        else:
+            st_time = time(7, 0)
+        occ_start = datetime.combine(target_date, st_time)
         due_at = occ_start + timedelta(minutes=int(plan["duration_min"] or 60))
         await _insert_task(
             conn,
@@ -518,7 +630,23 @@ async def create_plan(user_id: int, body) -> dict:
                 description=body.description,
             )
             await execute(conn, "UPDATE calendar_events SET event_plan_id = %s WHERE id = %s", (plan_id, cal_id))
-            await ensure_daily_slices(conn, user_id, date.today())
+            if mode == "deadline_divide":
+                await _schedule_divided_tasks(
+                    conn,
+                    user_id=user_id,
+                    plan_id=plan_id,
+                    plan={"description": body.description},
+                    title=body.title,
+                    deadline_at=deadline_at,
+                    priority_id=ids["priority_id"],
+                    energy_level_id=ids.get("energy_level_id"),
+                    planner_task_type_id=ids.get("planner_task_type_id"),
+                    course_id=ids.get("course_id"),
+                    section_id=ids.get("section_id"),
+                    estimated_effort_min=body.estimated_effort_min,
+                )
+            else:
+                await ensure_daily_slices(conn, user_id, date.today())
 
         await task_planner_repo.recompute_weights(conn, user_id)
         return {"id": plan_id, "calendar_event_id": cal_id, "task_id": task_id}

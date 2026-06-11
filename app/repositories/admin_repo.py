@@ -893,20 +893,6 @@ async def get_user_admin(conn: pymysql.Connection, user_id: int) -> dict[str, An
         (user_id,),
     )
 
-
-async def count_admins(conn: pymysql.Connection) -> int:
-    row = await fetch_one(
-        conn,
-        """
-        SELECT COUNT(*) AS n
-        FROM users u
-        INNER JOIN roles r ON r.id = u.role_id
-        WHERE r.code = 'admin'
-        """,
-    )
-    return int(row["n"]) if row else 0
-
-
 async def _purge_user_references(conn: pymysql.Connection, user_id: int, email: str) -> None:
     """Remove rows that block deleting a user (non-CASCADE FKs)."""
     uid = user_id

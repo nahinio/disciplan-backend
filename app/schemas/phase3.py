@@ -88,7 +88,7 @@ class UpsertGradeRequest(BaseModel):
 
 
 class CreateGradeComponentRequest(BaseModel):
-    component_type: str = Field(pattern="^(ct|evaluation|attendance|portal|team)$")
+    component_type: str = Field(pattern="^(ct|evaluation|attendance|portal|team|final|assignment)$")
     label: str = Field(min_length=1, max_length=80)
     component_code: str | None = Field(default=None, max_length=40)
     max_score: float = Field(gt=0)

@@ -38,9 +38,14 @@ def connect() -> pymysql.Connection:
             ctx.load_verify_locations(cadata=settings.db_ssl_ca)
         else:
             ca_path = ROOT / "certs" / "ca.pem"
-            ctx = ssl.create_default_context(cafile=str(ca_path))
-            ctx.check_hostname = True
-            ctx.verify_mode = ssl.CERT_REQUIRED
+            if ca_path.exists():
+                ctx = ssl.create_default_context(cafile=str(ca_path))
+                ctx.check_hostname = True
+                ctx.verify_mode = ssl.CERT_REQUIRED
+            else:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
         kwargs["ssl"] = ctx
     return pymysql.connect(**kwargs)
 

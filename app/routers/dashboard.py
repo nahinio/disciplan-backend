@@ -50,6 +50,16 @@ async def list_tasks_today(
     return {"items": items, "date": target.isoformat()}
 
 
+@router.get("/tasks/plan")
+async def get_tasks_plan(
+    user: dict = Depends(get_current_user),
+    start_date: str | None = Query(default=None, alias="date"),
+) -> dict:
+    target = _parse_date(start_date) or date.today()
+    items = await task_planner_service.list_plan(user["id"], target)
+    return {"items": items, "start_date": target.isoformat()}
+
+
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: int, user: dict = Depends(get_current_user)) -> dict:
     return await task_planner_service.get_task(user["id"], task_id)

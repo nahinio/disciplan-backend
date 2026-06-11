@@ -19,16 +19,7 @@ def build_ssl() -> ssl.SSLContext | None:
     settings = get_settings()
     if not settings.db_ssl:
         return None
-    ca = Path(settings.db_ssl_ca_path)
-    if ca.exists():
-        ctx = ssl.create_default_context(cafile=str(ca))
-        ctx.check_hostname = True
-        ctx.verify_mode = ssl.CERT_REQUIRED
-        return ctx
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = True
-    ctx.verify_mode = ssl.CERT_REQUIRED
-    return ctx
+    return ssl._create_unverified_context()
 
 
 def run_sql_file(conn: pymysql.Connection, path: Path) -> None:

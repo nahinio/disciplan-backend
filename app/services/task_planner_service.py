@@ -227,6 +227,25 @@ async def update_task(user_id: int, task_id: int, body) -> None:
                 completed_at=datetime.now(timezone.utc) if pct >= 100 else None,
             )
 
+        if task.get("event_plan_id") is not None:
+            from app.repositories import event_plan_repo
+            from app.db.session import execute
+            plan_id = task["event_plan_id"]
+            plan_row = await event_plan_repo.get_plan(conn, plan_id, user_id)
+            if plan_row and plan_row.get("scheduling_mode") != "deadline_divide":
+                updated_task = await task_planner_repo.get_task(conn, user_id, task_id)
+                if updated_task:
+                    is_completed_val = int(updated_task.get("is_completed") or 0)
+                    pct_val = float(updated_task.get("completion_percent") or 0)
+                    if is_completed_val:
+                        await event_plan_repo.complete_plan(conn, plan_id)
+                    else:
+                        await execute(
+                            conn,
+                            "UPDATE planner_event_plans SET is_completed = 0, completed_at = NULL, plan_completed_percent = %s WHERE id = %s",
+                            (pct_val, plan_id)
+                        )
+
         ids = {}
         if any(
             getattr(body, f, None) is not None
@@ -253,6 +272,11 @@ async def update_task(user_id: int, task_id: int, body) -> None:
             fields["estimated_effort_min"] = body.estimated_effort_min
         if body.attachment_file_id is not None:
             fields["attachment_file_id"] = body.attachment_file_id
+        if "scheduled_for_date" in body.model_fields_set:
+            if body.scheduled_for_date:
+                fields["scheduled_for_date"] = date.fromisoformat(body.scheduled_for_date)
+            else:
+                fields["scheduled_for_date"] = None
         fields.update(ids)
         if fields:
             await task_planner_repo.update_planner_task(conn, user_id, task_id, **fields)
@@ -299,3 +323,32 @@ async def get_routine(user_id: int, role_code: str) -> list[dict]:
 async def merged_calendar(user_id: int, from_dt: datetime | None = None) -> list[dict]:
     async with transaction() as conn:
         return await task_planner_repo.list_merged_calendar(conn, user_id, from_dt=from_dt)
+
+
+async def list_plan(user_id: int, start_date: date) -> list[dict]:
+    from datetime import timedelta
+    from app.services import event_plan_service
+
+    # Materialize slices for all days in the 10-day range
+    async with transaction() as conn:
+        for i in range(10):
+            target_date = start_date + timedelta(days=i)
+            await event_plan_service.ensure_daily_slices(conn, user_id, target_date)
+
+    end_date = start_date + timedelta(days=9)
+    async with get_connection() as conn:
+        rows = await task_planner_repo.list_tasks_for_range(conn, user_id, start_date, end_date)
+
+    results = []
+    for row in rows:
+        if row.get("scheduled_for_date"):
+            eff_date = row["scheduled_for_date"]
+            row["effective_date"] = eff_date.isoformat() if isinstance(eff_date, (date, datetime)) else str(eff_date)
+        elif row.get("due_at"):
+            eff_date = row["due_at"].date() if isinstance(row["due_at"], datetime) else row["due_at"]
+            row["effective_date"] = eff_date.isoformat() if isinstance(eff_date, (date, datetime)) else str(eff_date)
+        else:
+            row["effective_date"] = "unscheduled"
+        results.append(row)
+
+    return results

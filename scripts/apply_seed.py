@@ -51,9 +51,15 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
-    ctx = ssl.create_default_context(cafile=str(ROOT / "certs" / "ca.pem"))
-    ctx.check_hostname = True
-    ctx.verify_mode = ssl.CERT_REQUIRED
+    ca_path = ROOT / "certs" / "ca.pem"
+    if ca_path.exists():
+        ctx = ssl.create_default_context(cafile=str(ca_path))
+        ctx.check_hostname = True
+        ctx.verify_mode = ssl.CERT_REQUIRED
+    else:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
 
     conn = pymysql.connect(
         host=settings.db_host,

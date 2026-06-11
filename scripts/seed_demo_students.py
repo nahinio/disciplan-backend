@@ -19,6 +19,7 @@ from app.utils.security import hash_password  # noqa: E402
 DEFAULT_PASSWORD = os.environ.get("DEMO_STUDENT_PASSWORD", "TestPass123!").strip()
 
 DEMO_STUDENTS = [
+    ("phase2user@uiu.ac.bd", "Dr. Mohammad Younus"),
     ("ssumaia2420448@bscse.uiu.ac.bd", "Sadia Akter Sumaia"),
     ("mparves2420507@bscse.uiu.ac.bd", "Masud Parves"),
     ("amite2420456@bscse.uiu.ac.bd", "Atika Hakim"),
@@ -38,9 +39,15 @@ def connect() -> pymysql.Connection:
         "autocommit": False,
     }
     if settings.db_ssl:
-        ctx = ssl.create_default_context(cafile=str(ROOT / "certs" / "ca.pem"))
-        ctx.check_hostname = True
-        ctx.verify_mode = ssl.CERT_REQUIRED
+        ca_path = ROOT / "certs" / "ca.pem"
+        if ca_path.exists():
+            ctx = ssl.create_default_context(cafile=str(ca_path))
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
+        else:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
         kwargs["ssl"] = ctx
     return pymysql.connect(**kwargs)
 

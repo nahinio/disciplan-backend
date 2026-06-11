@@ -331,10 +331,3 @@ async def drop_student(conn: pymysql.Connection, section_id: int, student_user_i
         (section_id, student_user_id),
     )
     return count > 0
-
-
-async def update_user_role(conn: pymysql.Connection, user_id: int, role_code: str) -> None:
-    role = await fetch_one(conn, "SELECT id FROM roles WHERE code = %s", (role_code,))
-    if not role:
-        raise ValueError(f"Unknown role: {role_code}")
-    await execute(conn, "UPDATE users SET role_id = %s WHERE id = %s", (role["id"], user_id))

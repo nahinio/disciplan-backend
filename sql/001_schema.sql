@@ -429,21 +429,6 @@ CREATE TABLE section_enrollments (
         FOREIGN KEY (student_user_id) REFERENCES users (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE course_user_preferences (
-    user_id         BIGINT UNSIGNED  NOT NULL,
-    course_id       INT UNSIGNED     NOT NULL,
-    is_pinned       TINYINT(1)       NOT NULL DEFAULT 0,
-    accent_color    CHAR(7)          NULL,
-    is_muted        TINYINT(1)       NOT NULL DEFAULT 0,
-    updated_at      DATETIME(3)      NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-    PRIMARY KEY (user_id, course_id),
-    KEY idx_course_user_prefs_pinned (user_id, is_pinned),
-    CONSTRAINT fk_course_user_prefs_user
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-    CONSTRAINT fk_course_user_prefs_course
-        FOREIGN KEY (course_id) REFERENCES courses (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- ── Notifications (poll-based delivery) ──────────────────────────────────────
 
 CREATE TABLE notifications (
