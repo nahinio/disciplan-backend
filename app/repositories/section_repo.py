@@ -440,6 +440,7 @@ async def list_doubts(
         """
         SELECT
             d.id, d.title, d.body, d.is_verified, d.accepted_answer_id, d.created_at,
+            d.author_user_id,
             up.display_name AS author_name,
             COALESCE(SUM(CASE WHEN vd.value = 1 THEN 1 ELSE 0 END), 0) AS upvotes,
             (SELECT COUNT(*) FROM section_doubt_answers a
@@ -449,7 +450,7 @@ async def list_doubts(
         LEFT JOIN section_doubt_votes dv ON dv.doubt_id = d.id
         LEFT JOIN vote_directions vd ON vd.id = dv.direction_id
         WHERE d.section_id = %s AND d.deleted_at IS NULL
-        GROUP BY d.id, d.title, d.body, d.is_verified, d.created_at, up.display_name
+        GROUP BY d.id, d.title, d.body, d.is_verified, d.created_at, d.author_user_id, up.display_name
         ORDER BY upvotes DESC, d.created_at DESC
         LIMIT %s
         """,
@@ -475,12 +476,21 @@ async def create_doubt(
     )
 
 
+async def delete_doubt(conn: pymysql.Connection, doubt_id: int) -> bool:
+    count = await execute(
+        conn,
+        "UPDATE section_doubts SET deleted_at = UTC_TIMESTAMP(3) WHERE id = %s AND deleted_at IS NULL",
+        (doubt_id,),
+    )
+    return count > 0
+
+
 async def get_doubt(conn: pymysql.Connection, doubt_id: int) -> dict[str, Any] | None:
     return await fetch_one(
         conn,
         """
         SELECT
-            d.id, d.section_id, d.title, d.body, d.is_verified, d.accepted_answer_id,
+            d.id, d.section_id, d.author_user_id, d.title, d.body, d.is_verified, d.accepted_answer_id,
             d.created_at,
             up.display_name AS author_name,
             c.code AS course_code, s.section_label

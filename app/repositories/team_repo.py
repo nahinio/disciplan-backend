@@ -492,19 +492,6 @@ async def unpin_team(conn: pymysql.Connection, user_id: int, team_id: int) -> No
     )
 
 
-async def user_is_leader(conn: pymysql.Connection, team_id: int, user_id: int) -> bool:
-    row = await fetch_one(
-        conn,
-        """
-        SELECT 1 FROM team_members tm
-        INNER JOIN team_member_roles tmr ON tmr.id = tm.role_id
-        WHERE tm.team_id = %s AND tm.user_id = %s AND tm.left_at IS NULL AND tmr.code = 'leader'
-        """,
-        (team_id, user_id),
-    )
-    return row is not None
-
-
 async def list_section_teams(conn: pymysql.Connection, section_id: int) -> list[dict[str, Any]]:
     teams = await fetch_all(
         conn,

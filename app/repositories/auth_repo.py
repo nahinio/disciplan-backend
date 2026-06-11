@@ -140,14 +140,6 @@ async def store_refresh_token(conn: asyncmy.Connection, user_id: int, token: str
     )
 
 
-async def revoke_all_user_refresh_tokens(conn: asyncmy.Connection, user_id: int) -> None:
-    await execute(
-        conn,
-        "DELETE FROM refresh_tokens WHERE user_id = %s",
-        (user_id,),
-    )
-
-
 async def revoke_refresh_token(conn: asyncmy.Connection, token: str) -> None:
     await execute(
         conn,

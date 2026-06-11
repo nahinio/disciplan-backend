@@ -219,7 +219,7 @@ def compute_student_summary(
     other_rows = [
         c
         for c in rubric
-        if c["component_type"] in ("evaluation", "portal", "team", "attendance")
+        if c["component_type"] in ("evaluation", "portal", "team", "attendance", "final", "assignment")
     ]
 
     ct_scores: list[dict[str, Any]] = []

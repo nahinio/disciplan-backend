@@ -73,7 +73,7 @@ async def on_portal_created(
 
     grading_type = await task_planner_repo.get_planner_type_id(conn, "grading")
     priority = await fetch_one(
-        conn, "SELECT id FROM task_priorities WHERE code = 'high' LIMIT 1"
+        conn, "SELECT id FROM task_priorities WHERE code = 'medium' LIMIT 1"
     )
     if not grading_type or not priority:
         return
@@ -88,8 +88,9 @@ async def on_portal_created(
             course_id=course_id,
             section_id=section_id,
             planner_task_type_id=grading_type,
-            due_at=closes_at,
-            source="manual",
+            due_at=None,
+            scheduled_for_date=closes_at.date(),
+            source="grading_linked",
         )
 
 

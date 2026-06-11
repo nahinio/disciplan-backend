@@ -227,6 +227,14 @@ async def upsert_grade(
             max_score=body.max_score,
             feedback=body.feedback,
         )
+        if body.component_code.startswith("portal_"):
+            try:
+                portal_id = int(body.component_code.replace("portal_", ""))
+                await grading_integration_service._update_grading_tasks(
+                    conn, portal_id=portal_id, section_id=section["id"]
+                )
+            except Exception:
+                pass
     return {"message": "Grade saved"}
 
 

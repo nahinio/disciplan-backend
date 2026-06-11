@@ -98,6 +98,7 @@ class UpdateTaskRequest(BaseModel):
     completed: bool | None = None
     skipped: bool | None = None
     completed_portion_percent: float | None = Field(default=None, ge=0, le=100)
+    scheduled_for_date: str | None = None
 
 
 class SetDailyEnergyRequest(BaseModel):

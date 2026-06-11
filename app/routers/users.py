@@ -63,7 +63,7 @@ async def get_user_profile(
     if not profile:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Student profile not found",
+            detail="Profile not found",
         )
     return profile
 

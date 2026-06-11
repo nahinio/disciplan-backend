@@ -23,15 +23,23 @@ def _build_ssl() -> ssl.SSLContext | None:
         return None
 
     ctx = ssl.create_default_context()
-    ca_pem = settings.db_ssl_ca.strip()
+    ca_pem = settings.db_ssl_ca.strip() if settings.db_ssl_ca else ""
     if ca_pem:
         ctx.load_verify_locations(cadata=ca_pem)
+        ctx.check_hostname = True
+        ctx.verify_mode = ssl.CERT_REQUIRED
     elif settings.db_ssl_ca_path:
         ca_path = Path(settings.db_ssl_ca_path)
         if ca_path.exists():
             ctx.load_verify_locations(cafile=str(ca_path))
-    ctx.check_hostname = True
-    ctx.verify_mode = ssl.CERT_REQUIRED
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
+        else:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+    else:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
 

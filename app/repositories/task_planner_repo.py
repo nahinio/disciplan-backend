@@ -11,22 +11,32 @@ from app.db.session import execute, execute_returning_id, fetch_all, fetch_one
 
 PLANNER_WEIGHT_EXPR = """
     (
-        tp.sort_order * 10.0
-        * (1.0 + GREATEST(0, TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(3), COALESCE(ut.due_at, UTC_TIMESTAMP(3)))) / -24.0)
-        * (1.0 + (100 - ut.completion_percent) / 100.0)
-        * (1.0 + ut.reschedule_count * 0.25)
-        * (1.0 + COALESCE(ut.carryover_percent, 0) / 50.0)
-        * (1.0 + COALESCE(ut.days_behind, 0) * 0.15)
-        * CASE WHEN ut.is_skipped = 1 THEN 0 ELSE 1 END
+        CASE WHEN ut.is_skipped = 1 THEN 0.0 ELSE
+        (
+            (tp.sort_order * 10.0)
+            + GREATEST(0.0, 240.0 - TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(3), COALESCE(ut.due_at, UTC_TIMESTAMP(3))))
+        )
+        * (1.0 + COALESCE((
+            SELECT cnt FROM (
+                SELECT event_plan_id, COUNT(*) AS cnt
+                FROM user_tasks
+                WHERE is_completed = 0 AND is_skipped = 0
+                GROUP BY event_plan_id
+            ) sub
+            WHERE sub.event_plan_id = ut.event_plan_id
+        ), 0) * 0.2)
+        END
     )
 """
 
 SCHEDULED_WEIGHT_EXPR = """
     (
-        tp.sort_order * 10.0
-        * (1.0 + GREATEST(0, TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(3), COALESCE(ut.occurrence_starts_at, ut.due_at, UTC_TIMESTAMP(3)))) / -12.0)
-        * (1.0 + (100 - ut.completion_percent) / 100.0)
-        * CASE WHEN ut.is_skipped = 1 THEN 0 ELSE 1 END
+        CASE WHEN ut.is_skipped = 1 THEN 0.0 ELSE
+        (
+            (tp.sort_order * 10.0)
+            + GREATEST(0.0, 240.0 - TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(3), COALESCE(ut.occurrence_starts_at, ut.due_at, UTC_TIMESTAMP(3))))
+        )
+        END
     )
 """
 
@@ -76,32 +86,104 @@ TASK_SELECT = f"""
 
 
 async def reschedule_overdue_tasks(conn: pymysql.Connection, user_id: int) -> int:
-    """Roll overdue incomplete tasks to tomorrow; bump reschedule_count."""
-    return await execute(
+    """Overdue incomplete tasks are rescheduled to the upcoming day with the lightest workload."""
+    overdue_tasks = await fetch_all(
         conn,
         """
-        UPDATE user_tasks
-        SET
-            reschedule_count = reschedule_count + 1,
-            due_at = DATE_ADD(
-                COALESCE(due_at, UTC_TIMESTAMP(3)),
-                INTERVAL 1 DAY
-            ),
-            scheduled_for_date = DATE_ADD(COALESCE(scheduled_for_date, DATE(UTC_TIMESTAMP(3))), INTERVAL 1 DAY),
-            original_due_at = COALESCE(original_due_at, due_at),
-            source = CASE WHEN source = 'lecture_auto' THEN source ELSE 'reschedule' END
-        WHERE user_id = %s
-          AND is_completed = 0
-          AND is_skipped = 0
-          AND completion_percent < 100
-          AND due_at IS NOT NULL
-          AND due_at < UTC_TIMESTAMP(3)
-          AND source NOT IN ('event_slice', 'grading_linked', 'recurring_occurrence', 'one_time')
-          AND COALESCE(weight_profile, 'planner') = 'planner'
-          AND event_plan_id IS NULL
+        SELECT ut.id, ut.title, ut.due_at, ut.scheduled_for_date, ut.event_plan_id, pep.deadline_at
+        FROM user_tasks ut
+        LEFT JOIN planner_event_plans pep ON pep.id = ut.event_plan_id
+        WHERE ut.user_id = %s
+          AND ut.is_completed = 0
+          AND ut.is_skipped = 0
+          AND ut.completion_percent < 100
+          AND ut.due_at IS NOT NULL
+          AND ut.due_at < UTC_TIMESTAMP(3)
+          AND (
+             ut.source = 'event_slice'
+             OR (ut.event_plan_id IS NULL AND COALESCE(ut.weight_profile, 'planner') = 'planner' AND ut.source NOT IN ('grading_linked', 'recurring_occurrence', 'one_time'))
+          )
         """,
         (user_id,),
     )
+    if not overdue_tasks:
+        return 0
+
+    from datetime import date, time, datetime, timedelta
+
+    today = date.today()
+    max_date = today + timedelta(days=6)
+    
+    for t in overdue_tasks:
+        deadline = t.get("deadline_at") or t.get("due_at")
+        if deadline:
+            d = deadline.date() if isinstance(deadline, datetime) else deadline
+            if d > max_date:
+                max_date = d
+
+    rows = await fetch_all(
+        conn,
+        """
+        SELECT COALESCE(scheduled_for_date, DATE(due_at)) AS task_date, COUNT(*) AS cnt
+        FROM user_tasks
+        WHERE user_id = %s
+          AND is_completed = 0
+          AND is_skipped = 0
+          AND (
+            scheduled_for_date BETWEEN %s AND %s
+            OR (scheduled_for_date IS NULL AND DATE(due_at) BETWEEN %s AND %s)
+          )
+        GROUP BY task_date
+        """,
+        (user_id, today, max_date, today, max_date),
+    )
+    counts = {}
+    for r in rows:
+        d = r.get("task_date")
+        if d:
+            if isinstance(d, datetime):
+                d = d.date()
+            counts[d] = int(r["cnt"])
+
+    rescheduled_count = 0
+    for t in overdue_tasks:
+        deadline = t.get("deadline_at") or t.get("due_at")
+        if deadline:
+            deadline_date = deadline.date() if isinstance(deadline, datetime) else deadline
+        else:
+            deadline_date = today + timedelta(days=6)
+
+        if deadline_date < today:
+            best_date = today
+        else:
+            days_rem = (deadline_date - today).days + 1
+            candidates = [today + timedelta(days=i) for i in range(days_rem)]
+            sorted_candidates = sorted(candidates, key=lambda d: (counts.get(d, 0), d))
+            best_date = sorted_candidates[0]
+
+        orig_due = t.get("due_at")
+        t_time = orig_due.time() if isinstance(orig_due, datetime) else time(23, 59)
+        new_due = datetime.combine(best_date, t_time)
+
+        updated = await execute(
+            conn,
+            """
+            UPDATE user_tasks
+            SET
+                reschedule_count = reschedule_count + 1,
+                due_at = %s,
+                scheduled_for_date = %s,
+                original_due_at = COALESCE(original_due_at, %s),
+                source = CASE WHEN source = 'lecture_auto' THEN source ELSE 'reschedule' END
+            WHERE id = %s
+            """,
+            (new_due, best_date, orig_due, t["id"]),
+        )
+        if updated:
+            rescheduled_count += 1
+            counts[best_date] = counts.get(best_date, 0) + 1
+
+    return rescheduled_count
 
 
 async def recompute_weights(conn: pymysql.Connection, user_id: int) -> None:
@@ -181,6 +263,31 @@ async def list_all_tasks(conn: pymysql.Connection, user_id: int) -> list[dict[st
         ORDER BY ut.is_completed ASC, live_weight DESC, ut.due_at ASC
         """,
         (user_id,),
+    )
+
+
+async def list_tasks_for_range(
+    conn: pymysql.Connection,
+    user_id: int,
+    start_date: date,
+    end_date: date,
+) -> list[dict[str, Any]]:
+    await maintain_tasks_for_user(conn, user_id)
+
+    return await fetch_all(
+        conn,
+        f"""
+        {TASK_SELECT}
+        WHERE ut.user_id = %s
+          AND ut.is_skipped = 0
+          AND (
+            ut.scheduled_for_date BETWEEN %s AND %s
+            OR (ut.scheduled_for_date IS NULL AND DATE(ut.due_at) BETWEEN %s AND %s)
+            OR (ut.scheduled_for_date IS NULL AND ut.due_at IS NULL AND ut.is_completed = 0)
+          )
+        ORDER BY ut.is_completed ASC, live_weight DESC, ut.due_at ASC, ut.id ASC
+        """,
+        (user_id, start_date, end_date, start_date, end_date),
     )
 
 
@@ -431,16 +538,16 @@ async def list_merged_calendar(
     task_params: list[Any] = [user_id]
     task_filter = ""
     if from_dt:
-        task_filter = " AND ut.due_at >= %s"
+        task_filter = " AND COALESCE(ut.due_at, CAST(ut.scheduled_for_date AS DATETIME)) >= %s"
         task_params.append(from_dt)
 
     tasks = await fetch_all(
         conn,
         f"""
         SELECT ut.id, ut.title, ut.description,
-               ut.due_at AS starts_at,
-               DATE_ADD(ut.due_at, INTERVAL COALESCE(ut.estimated_effort_min, 60) MINUTE) AS ends_at,
-               0 AS all_day,
+               COALESCE(ut.due_at, CAST(ut.scheduled_for_date AS DATETIME)) AS starts_at,
+               DATE_ADD(COALESCE(ut.due_at, CAST(ut.scheduled_for_date AS DATETIME)), INTERVAL COALESCE(ut.estimated_effort_min, 60) MINUTE) AS ends_at,
+               CASE WHEN ut.due_at IS NULL THEN 1 ELSE 0 END AS all_day,
                c.code AS course_code,
                ut.event_plan_id,
                'task' AS item_type,
@@ -448,8 +555,8 @@ async def list_merged_calendar(
         FROM user_tasks ut
         LEFT JOIN courses c ON c.id = ut.course_id
         LEFT JOIN planner_task_types ptt ON ptt.id = ut.planner_task_type_id
-        WHERE ut.user_id = %s AND ut.due_at IS NOT NULL AND ut.is_skipped = 0 {task_filter}
-        ORDER BY ut.due_at ASC
+        WHERE ut.user_id = %s AND (ut.due_at IS NOT NULL OR ut.scheduled_for_date IS NOT NULL) AND ut.is_skipped = 0 {task_filter}
+        ORDER BY starts_at ASC
         """,
         tuple(task_params),
     )

@@ -18,7 +18,18 @@ from app.services import task_planner_service  # noqa: E402
 def get_student_id() -> int:
     settings = get_settings()
     ca = Path(settings.db_ssl_ca_path)
-    ctx = ssl.create_default_context(cafile=str(ca)) if ca.exists() else ssl.create_default_context()
+    if settings.db_ssl:
+        if ca.exists():
+            ctx = ssl.create_default_context(cafile=str(ca))
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
+        else:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+    else:
+        ctx = None
+
     conn = pymysql.connect(
         host=settings.db_host,
         port=settings.db_port,
@@ -37,7 +48,11 @@ def get_student_id() -> int:
         conn.close()
 
 
+from app.db.pool import init_pool  # noqa: E402
+
+
 async def main() -> None:
+    init_pool()
     uid = get_student_id()
     print(f"student_id={uid}")
     t0 = time.time()

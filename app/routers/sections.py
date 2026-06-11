@@ -260,6 +260,23 @@ async def create_doubt(
     return {"id": doubt_id, "message": "Doubt posted"}
 
 
+@router.delete("/doubts/{doubt_id}")
+async def delete_doubt(
+    doubt_id: int,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    async with transaction() as conn:
+        doubt = await section_repo.get_doubt(conn, doubt_id)
+        if not doubt:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doubt not found")
+        if user["role_code"] not in ("faculty", "admin") and doubt["author_user_id"] != user["id"]:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete other user's doubt")
+        ok = await section_repo.delete_doubt(conn, doubt_id)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doubt not found")
+    return {"message": "Doubt deleted"}
+
+
 @router.post("/doubts/{doubt_id}/answers")
 async def answer_doubt(
     doubt_id: int,

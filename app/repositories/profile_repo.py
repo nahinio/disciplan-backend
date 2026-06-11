@@ -38,50 +38,75 @@ async def get_public_student_profile(
         """,
         (user_id,),
     )
-    if not row or row["role_code"] != "student" or row["status_code"] != "active":
+    if not row or row["role_code"] not in ("student", "faculty") or row["status_code"] != "active":
         return None
 
-    tier_info = await gamification_repo.get_tier_info(conn, user_id)
-    badges = await gamification_repo.list_user_badges(conn, user_id)
-    streaks = await gamification_repo.list_user_streaks(conn, user_id)
-    rank = await gamification_repo.get_user_rank(conn, user_id, period="all_time")
-    courses = await academic_repo.list_user_sections(conn, user_id, "student")
+    role = row["role_code"]
+    courses = await academic_repo.list_user_sections(conn, user_id, role)
     raw_blogs = await blog_repo.list_posts_by_author(conn, user_id, limit=12)
     blogs = [_serialize_blog_row(b) for b in raw_blogs]
-    heatmap = await get_task_completion_heatmap(conn, user_id)
 
-    unlocked_badges = [
-        {
-            "code": b["code"],
-            "label": b["label"],
-            "family": b.get("family"),
-            "level": b.get("level"),
-            "icon_url": f"/badges/demo/{b['icon_key']}.svg" if b.get("icon_key") else None,
-            "caption": b.get("description"),
-            "awarded_at": _iso_dt(b.get("awarded_at")),
+    if role == "student":
+        tier_info = await gamification_repo.get_tier_info(conn, user_id)
+        badges = await gamification_repo.list_user_badges(conn, user_id)
+        streaks = await gamification_repo.list_user_streaks(conn, user_id)
+        rank = await gamification_repo.get_user_rank(conn, user_id, period="all_time")
+        heatmap = await get_task_completion_heatmap(conn, user_id)
+
+        unlocked_badges = [
+            {
+                "code": b["code"],
+                "label": b["label"],
+                "family": b.get("family"),
+                "level": b.get("level"),
+                "icon_url": f"/badges/demo/{b['icon_key']}.svg" if b.get("icon_key") else None,
+                "caption": b.get("description"),
+                "awarded_at": _iso_dt(b.get("awarded_at")),
+            }
+            for b in badges
+        ]
+
+        return {
+            "id": row["id"],
+            "display_name": row["display_name"],
+            "bio": row.get("bio"),
+            "avatar_url": row.get("avatar_url"),
+            "role_code": role,
+            "department_code": row.get("department_code"),
+            "department_name": row.get("department_name"),
+            "total_points": int(row.get("total_points") or 0),
+            "tier_code": row.get("tier_code"),
+            "tier_label": row.get("tier_label"),
+            "next_tier_points": tier_info.get("next_tier_points") if tier_info else None,
+            "next_tier_label": tier_info.get("next_tier_label") if tier_info else None,
+            "rank": rank.get("leaderboard_rank") if rank else None,
+            "streaks": streaks,
+            "badges": unlocked_badges,
+            "courses": courses,
+            "blogs": blogs,
+            "heatmap": heatmap,
         }
-        for b in badges
-    ]
-
-    return {
-        "id": row["id"],
-        "display_name": row["display_name"],
-        "bio": row.get("bio"),
-        "avatar_url": row.get("avatar_url"),
-        "department_code": row.get("department_code"),
-        "department_name": row.get("department_name"),
-        "total_points": int(row.get("total_points") or 0),
-        "tier_code": row.get("tier_code"),
-        "tier_label": row.get("tier_label"),
-        "next_tier_points": tier_info.get("next_tier_points") if tier_info else None,
-        "next_tier_label": tier_info.get("next_tier_label") if tier_info else None,
-        "rank": rank.get("leaderboard_rank") if rank else None,
-        "streaks": streaks,
-        "badges": unlocked_badges,
-        "courses": courses,
-        "blogs": blogs,
-        "heatmap": heatmap,
-    }
+    else:
+        return {
+            "id": row["id"],
+            "display_name": row["display_name"],
+            "bio": row.get("bio"),
+            "avatar_url": row.get("avatar_url"),
+            "role_code": role,
+            "department_code": row.get("department_code"),
+            "department_name": row.get("department_name"),
+            "total_points": 0,
+            "tier_code": None,
+            "tier_label": None,
+            "next_tier_points": None,
+            "next_tier_label": None,
+            "rank": None,
+            "streaks": [],
+            "badges": [],
+            "courses": courses,
+            "blogs": blogs,
+            "heatmap": None,
+        }
 
 
 def _iso_dt(value: datetime | date | str | None) -> str | None:

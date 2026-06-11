@@ -269,50 +269,6 @@ async def grade_submission(
     return count > 0
 
 
-async def list_gradebook(conn: pymysql.Connection, section_id: int) -> list[dict[str, Any]]:
-    students = await fetch_all(
-        conn,
-        """
-        SELECT
-            u.id, up.display_name AS name, u.email
-        FROM section_enrollments se
-        INNER JOIN users u ON u.id = se.student_user_id
-        LEFT JOIN user_profiles up ON up.user_id = u.id
-        WHERE se.section_id = %s AND se.dropped_at IS NULL
-        ORDER BY up.display_name, u.email
-        """,
-        (section_id,),
-    )
-
-    grades = await fetch_all(
-        conn,
-        """
-        SELECT student_user_id, component_code, score, max_score
-        FROM section_grades
-        WHERE section_id = %s
-        """,
-        (section_id,),
-    )
-    grade_map: dict[int, list[dict]] = {}
-    for g in grades:
-        grade_map.setdefault(g["student_user_id"], []).append(g)
-
-    result = []
-    for s in students:
-        components = grade_map.get(s["id"], [])
-        ct_marks = [float(c["score"]) for c in components if c["component_code"].startswith("ct")]
-        mid = next((c for c in components if c["component_code"] == "mid"), None)
-        result.append({
-            "id": s["id"],
-            "name": s["name"],
-            "email": s["email"],
-            "ct_marks": ct_marks,
-            "mid_marks": float(mid["score"]) if mid else None,
-            "components": components,
-        })
-    return result
-
-
 async def upsert_grade(
     conn: pymysql.Connection,
     *,
